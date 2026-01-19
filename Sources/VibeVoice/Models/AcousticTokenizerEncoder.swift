@@ -36,7 +36,7 @@ public class TokenizerEncoder: Module {
         )
         downsampleLayersList.append(stem)
 
-        for i in 0..<ratios.count {
+        for i in 0 ..< ratios.count {
             let inCh = nFilters * Int(pow(2.0, Double(i)))
             let outCh = nFilters * Int(pow(2.0, Double(i + 1)))
             let downsample = SConv1d(
@@ -53,20 +53,21 @@ public class TokenizerEncoder: Module {
         _downsampleLayers.wrappedValue = downsampleLayersList
 
         var stagesList: [[Block1D]] = []
-        for i in 0..<numStages {
+        for i in 0 ..< numStages {
             let inCh = nFilters * Int(pow(2.0, Double(i)))
             var stageBlocks: [Block1D] = []
-            for _ in 0..<depths[i] {
-                stageBlocks.append(Block1D(
-                    dim: inCh,
-                    kernelSize: 7,
-                    mixerLayer: config.mixerLayer,
-                    layerScaleInitValue: config.layerScaleInitValue,
-                    causal: causal,
-                    padMode: config.padMode,
-                    bias: config.convBias,
-                    eps: config.layernormEps
-                ))
+            for _ in 0 ..< depths[i] {
+                stageBlocks.append(
+                    Block1D(
+                        dim: inCh,
+                        kernelSize: 7,
+                        mixerLayer: config.mixerLayer,
+                        layerScaleInitValue: config.layerScaleInitValue,
+                        causal: causal,
+                        padMode: config.padMode,
+                        bias: config.convBias,
+                        eps: config.layernormEps
+                    ))
             }
             stagesList.append(stageBlocks)
         }
@@ -108,7 +109,7 @@ public class TokenizerEncoder: Module {
     ) -> MLXArray {
         var out = x
 
-        for i in 0..<depths.count {
+        for i in 0 ..< depths.count {
             out = downsampleLayers[i](out, cache: cache, useCache: useCache)
 
             for block in stages[i] {

@@ -3,15 +3,16 @@ import PackageDescription
 
 let package = Package(
     name: "VibeVoice",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
         .library(name: "VibeVoice", targets: ["VibeVoice"]),
-        .executable(name: "vibevoiceCLI", targets: ["VibeVoiceCLI"])
+        .executable(name: "vibevoiceCLI", targets: ["VibeVoiceCLI"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.29.1"),
-        .package(url: "https://github.com/huggingface/swift-transformers", .upToNextMinor(from: "1.1.0")),
-        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0")
+        .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.30.0"),
+        .package(
+            url: "https://github.com/huggingface/swift-transformers", .upToNextMinor(from: "1.1.0")),
+        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
     ],
     targets: [
         .target(
@@ -21,7 +22,7 @@ let package = Package(
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXRandom", package: "mlx-swift"),
                 .product(name: "MLXFast", package: "mlx-swift"),
-                .product(name: "Transformers", package: "swift-transformers")
+                .product(name: "Transformers", package: "swift-transformers"),
             ]
         ),
         .executableTarget(
@@ -31,8 +32,8 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
-                .product(name: "Transformers", package: "swift-transformers")
+                .product(name: "Transformers", package: "swift-transformers"),
             ]
-        )
+        ),
     ]
 )

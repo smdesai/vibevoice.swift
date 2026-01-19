@@ -139,7 +139,8 @@ public struct VibeVoiceQuantizer {
 
         let resolvedSourceURL = sourceURL.resolvingSymlinksInPath()
 
-        let contents = try fm.contentsOfDirectory(at: resolvedSourceURL, includingPropertiesForKeys: nil)
+        let contents = try fm.contentsOfDirectory(
+            at: resolvedSourceURL, includingPropertiesForKeys: nil)
         let safetensorFiles = contents.filter { $0.pathExtension == "safetensors" }
 
         if safetensorFiles.isEmpty {
@@ -167,10 +168,13 @@ public struct VibeVoiceQuantizer {
             let isEmbedding = key.contains("embed_tokens") || key.contains("tts_input_types")
             let isNorm = key.contains("norm") || key.contains("layernorm")
             let isEosClassifier = key.contains("eos_classifier")
-            let isAcousticConv = key.contains("acoustic_tokenizer") &&
-                (key.contains(".conv.") || key.contains(".convtr.") || key.contains(".mixer."))
+            let isAcousticConv =
+                key.contains("acoustic_tokenizer")
+                && (key.contains(".conv.") || key.contains(".convtr.") || key.contains(".mixer."))
 
-            if key.hasSuffix(".weight") && tensor.ndim == 2 && !isEmbedding && !isNorm && !isAcousticConv && !isEosClassifier {
+            if key.hasSuffix(".weight") && tensor.ndim == 2 && !isEmbedding && !isNorm
+                && !isAcousticConv && !isEosClassifier
+            {
                 let outDim = tensor.dim(0)
                 let inDim = tensor.dim(1)
 
@@ -195,17 +199,18 @@ public struct VibeVoiceQuantizer {
                         quantizedWeights["\(base).biases"] = b
                     }
 
-                    quantizedLayers.append(.init(
-                        name: base,
-                        shape: [outDim, inDim],
-                        inDim: inDim,
-                        outDim: outDim,
-                        file: "model.safetensors",
-                        quantFile: "model.safetensors",
-                        groupSize: spec.groupSize,
-                        bits: spec.bits,
-                        mode: spec.mode.rawValue
-                    ))
+                    quantizedLayers.append(
+                        .init(
+                            name: base,
+                            shape: [outDim, inDim],
+                            inDim: inDim,
+                            outDim: outDim,
+                            file: "model.safetensors",
+                            quantFile: "model.safetensors",
+                            groupSize: spec.groupSize,
+                            bits: spec.bits,
+                            mode: spec.mode.rawValue
+                        ))
 
                     quantizedCount += 1
 
@@ -376,7 +381,10 @@ public struct VibeVoiceQuantizer {
 
             let (groupSize, bits, modeStr) =
                 manifest.layers.first(where: { $0.name == path }).map {
-                    ($0.groupSize ?? defaultSpec.0, $0.bits ?? defaultSpec.1, $0.mode ?? defaultSpec.2)
+                    (
+                        $0.groupSize ?? defaultSpec.0, $0.bits ?? defaultSpec.1,
+                        $0.mode ?? defaultSpec.2
+                    )
                 } ?? defaultSpec
             let mode: QuantizationMode = modeStr == "mxfp4" ? .mxfp4 : .affine
             return (groupSize, bits, mode)
