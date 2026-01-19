@@ -23,12 +23,14 @@ public class RealtimeAudioPlayer: AudioStreamerDelegate {
         engine = AVAudioEngine()
         playerNode = AVAudioPlayerNode()
 
-        guard let audioFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: sampleRate,
-            channels: 1,
-            interleaved: false
-        ) else {
+        guard
+            let audioFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: sampleRate,
+                channels: 1,
+                interleaved: false
+            )
+        else {
             throw RealtimeAudioPlayerError.failedToCreateFormat
         }
         format = audioFormat
@@ -59,10 +61,12 @@ public class RealtimeAudioPlayer: AudioStreamerDelegate {
     public func scheduleAudio(samples: [Float]) {
         guard isPlaying, !samples.isEmpty else { return }
 
-        guard let buffer = AVAudioPCMBuffer(
-            pcmFormat: format,
-            frameCapacity: AVAudioFrameCount(samples.count)
-        ) else { return }
+        guard
+            let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(samples.count)
+            )
+        else { return }
 
         buffer.frameLength = AVAudioFrameCount(samples.count)
 
@@ -103,7 +107,9 @@ public class RealtimeAudioPlayer: AudioStreamerDelegate {
         }
     }
 
-    public func audioStreamer(_ streamer: AudioStreamer, didGenerateChunk chunk: MLXArray, atIndex sampleIndex: Int) {
+    public func audioStreamer(
+        _ streamer: AudioStreamer, didGenerateChunk chunk: MLXArray, atIndex sampleIndex: Int
+    ) {
         scheduleAudio(chunk: chunk)
     }
 
@@ -147,22 +153,26 @@ public class SimpleAudioPlayer {
         let engine = AVAudioEngine()
         let playerNode = AVAudioPlayerNode()
 
-        guard let format = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: sampleRate,
-            channels: 1,
-            interleaved: false
-        ) else {
+        guard
+            let format = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: sampleRate,
+                channels: 1,
+                interleaved: false
+            )
+        else {
             throw RealtimeAudioPlayerError.failedToCreateFormat
         }
 
         engine.attach(playerNode)
         engine.connect(playerNode, to: engine.mainMixerNode, format: format)
 
-        guard let buffer = AVAudioPCMBuffer(
-            pcmFormat: format,
-            frameCapacity: AVAudioFrameCount(samples.count)
-        ) else { return }
+        guard
+            let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(samples.count)
+            )
+        else { return }
 
         buffer.frameLength = AVAudioFrameCount(samples.count)
 

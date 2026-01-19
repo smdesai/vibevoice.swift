@@ -1,5 +1,5 @@
-import ArgumentParser
 import AVFoundation
+import ArgumentParser
 import Foundation
 import MLX
 import MLXNN
@@ -17,7 +17,7 @@ struct VibeVoiceCLI: AsyncParsableCommand {
             Generate.self,
             Speak.self,
             Stream.self,
-            Quantize.self
+            Quantize.self,
         ],
         defaultSubcommand: Generate.self
     )
@@ -54,7 +54,7 @@ struct Generate: AsyncParsableCommand {
 
     func run() async throws {
         print("VibeVoice Text-to-Speech")
-        print("=" .repeated(40))
+        print("=".repeated(40))
         print()
         print("Text: \"\(text)\"")
         print("Output: \(output)")
@@ -90,7 +90,8 @@ struct Generate: AsyncParsableCommand {
         let tokenIds = MLXArray(inputTokens.map { Int32($0) }).reshaped([1, inputTokens.count])
 
         let startTime = Date()
-        let audio = try inference.generateWithVoiceCache(tokenIds: tokenIds, maxSpeechTokens: maxTokens)
+        let audio = try inference.generateWithVoiceCache(
+            tokenIds: tokenIds, maxSpeechTokens: maxTokens)
         eval(audio)
         let elapsed = Date().timeIntervalSince(startTime)
 
@@ -139,7 +140,7 @@ struct Speak: AsyncParsableCommand {
 
     func run() async throws {
         print("VibeVoice Realtime TTS")
-        print("=" .repeated(40))
+        print("=".repeated(40))
         print()
         print("Text: \"\(text)\"")
         print("Steps: \(steps)")
@@ -223,7 +224,7 @@ struct Speak: AsyncParsableCommand {
         let totalTime = Date().timeIntervalSince(startTime)
 
         print()
-        print("=" .repeated(40))
+        print("=".repeated(40))
         print("Statistics:")
         print("  Chunks generated: \(streamer.chunkCount)")
         print("  Total samples: \(streamer.totalSamples)")
@@ -238,14 +239,16 @@ struct Speak: AsyncParsableCommand {
 
         if chunkTimestamps.count > 1 {
             var interChunkLatencies: [Double] = []
-            for i in 1..<chunkTimestamps.count {
+            for i in 1 ..< chunkTimestamps.count {
                 let latency = chunkTimestamps[i].timeIntervalSince(chunkTimestamps[i - 1])
                 interChunkLatencies.append(latency)
             }
             let avgLatency = interChunkLatencies.reduce(0, +) / Double(interChunkLatencies.count)
             let minLatency = interChunkLatencies.min() ?? 0
             let maxLatency = interChunkLatencies.max() ?? 0
-            print("  Avg chunk latency: \(String(format: "%.0f", avgLatency * 1000))ms (min: \(String(format: "%.0f", minLatency * 1000))ms, max: \(String(format: "%.0f", maxLatency * 1000))ms)")
+            print(
+                "  Avg chunk latency: \(String(format: "%.0f", avgLatency * 1000))ms (min: \(String(format: "%.0f", minLatency * 1000))ms, max: \(String(format: "%.0f", maxLatency * 1000))ms)"
+            )
         }
 
         if streamer.duration > 0 {
@@ -255,10 +258,12 @@ struct Speak: AsyncParsableCommand {
             let audioPerChunk = 3200.0 / Double(AudioConstants.sampleRate)
             if chunkTimestamps.count > 1 {
                 var interChunkLatencies: [Double] = []
-                for i in 1..<chunkTimestamps.count {
-                    interChunkLatencies.append(chunkTimestamps[i].timeIntervalSince(chunkTimestamps[i - 1]))
+                for i in 1 ..< chunkTimestamps.count {
+                    interChunkLatencies.append(
+                        chunkTimestamps[i].timeIntervalSince(chunkTimestamps[i - 1]))
                 }
-                let avgLatency = interChunkLatencies.reduce(0, +) / Double(interChunkLatencies.count)
+                let avgLatency =
+                    interChunkLatencies.reduce(0, +) / Double(interChunkLatencies.count)
                 if avgLatency < audioPerChunk {
                     print("  Status: Faster than realtime (generating ahead of playback)")
                 } else {
@@ -307,7 +312,7 @@ struct Stream: AsyncParsableCommand {
 
         if !isPiped {
             print("VibeVoice Streaming Mode")
-            print("=" .repeated(40))
+            print("=".repeated(40))
             print("Reading text from stdin")
             print("Pipe from LLM: mlx_lm.generate -p 'prompt' | vibevoice stream --voice-cache ...")
             print()
@@ -402,7 +407,7 @@ struct Stream: AsyncParsableCommand {
         player.stop()
 
         fputs("\n", stderr)
-        fputs("=" .repeated(40) + "\n", stderr)
+        fputs("=".repeated(40) + "\n", stderr)
         fputs("Statistics:\n", stderr)
         fputs("  Chunks generated: \(streamer.chunkCount)\n", stderr)
         fputs("  Total samples: \(streamer.totalSamples)\n", stderr)
@@ -442,7 +447,7 @@ struct Quantize: AsyncParsableCommand {
 
     func run() async throws {
         print("VibeVoice Model Quantization")
-        print("=" .repeated(40))
+        print("=".repeated(40))
         print()
         print("Input: \(input)")
         print("Output: \(output)")

@@ -73,7 +73,9 @@ public struct WAVWriter {
         try data.write(to: url)
     }
 
-    public static func duration(samples sampleCount: Int, sampleRate: Int = AudioConstants.sampleRate) -> Double {
+    public static func duration(
+        samples sampleCount: Int, sampleRate: Int = AudioConstants.sampleRate
+    ) -> Double {
         return Double(sampleCount) / Double(sampleRate)
     }
 

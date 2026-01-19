@@ -2,15 +2,16 @@ import Foundation
 import MLX
 
 public protocol AudioStreamerDelegate: AnyObject {
-    func audioStreamer(_ streamer: AudioStreamer, didGenerateChunk chunk: MLXArray, atIndex sampleIndex: Int)
+    func audioStreamer(
+        _ streamer: AudioStreamer, didGenerateChunk chunk: MLXArray, atIndex sampleIndex: Int)
 
     func audioStreamerDidFinish(_ streamer: AudioStreamer)
 
     func audioStreamer(_ streamer: AudioStreamer, didEncounterError error: Error)
 }
 
-public extension AudioStreamerDelegate {
-    func audioStreamer(_ streamer: AudioStreamer, didEncounterError error: Error) {}
+extension AudioStreamerDelegate {
+    public func audioStreamer(_ streamer: AudioStreamer, didEncounterError error: Error) {}
 }
 
 public class AudioStreamer {
@@ -77,7 +78,9 @@ public class AudioChunkCollector: AudioStreamerDelegate {
 
     public init() {}
 
-    public func audioStreamer(_ streamer: AudioStreamer, didGenerateChunk chunk: MLXArray, atIndex sampleIndex: Int) {
+    public func audioStreamer(
+        _ streamer: AudioStreamer, didGenerateChunk chunk: MLXArray, atIndex sampleIndex: Int
+    ) {
         chunks.append(chunk)
     }
 

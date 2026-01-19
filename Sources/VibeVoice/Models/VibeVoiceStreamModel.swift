@@ -42,11 +42,15 @@ public struct VibeVoiceConfiguration: Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         decoderConfig = try container.decode(Qwen2Configuration.self, forKey: .decoderConfig)
-        acousticTokenizerConfig = try container.decode(AcousticTokenizerConfiguration.self, forKey: .acousticTokenizerConfig)
-        diffusionHeadConfig = try container.decode(DiffusionHeadConfiguration.self, forKey: .diffusionHeadConfig)
+        acousticTokenizerConfig = try container.decode(
+            AcousticTokenizerConfiguration.self, forKey: .acousticTokenizerConfig)
+        diffusionHeadConfig = try container.decode(
+            DiffusionHeadConfiguration.self, forKey: .diffusionHeadConfig)
         acousticVaeDim = try container.decodeIfPresent(Int.self, forKey: .acousticVaeDim) ?? 64
 
-        if let ttsLayers = try container.decodeIfPresent(Int.self, forKey: .ttsBackboneNumHiddenLayers) {
+        if let ttsLayers = try container.decodeIfPresent(
+            Int.self, forKey: .ttsBackboneNumHiddenLayers)
+        {
             ttsBackboneNumHiddenLayers = ttsLayers
         } else {
             let totalLayers = decoderConfig.hiddenLayers
@@ -95,7 +99,8 @@ public class VibeVoiceStreamModel: Module {
         self.config = config
 
         var lmConfig = config.decoderConfig
-        let lmBackboneNumHiddenLayers = config.decoderConfig.hiddenLayers - config.ttsBackboneNumHiddenLayers
+        let lmBackboneNumHiddenLayers =
+            config.decoderConfig.hiddenLayers - config.ttsBackboneNumHiddenLayers
         lmConfig.hiddenLayers = lmBackboneNumHiddenLayers
 
         _languageModel.wrappedValue = Qwen2Model(lmConfig)
@@ -105,7 +110,8 @@ public class VibeVoiceStreamModel: Module {
 
         _ttsLanguageModel.wrappedValue = Qwen2Model(ttsLmConfig)
 
-        _ttsInputTypes.wrappedValue = Embedding(embeddingCount: 2, dimensions: config.decoderConfig.hiddenSize)
+        _ttsInputTypes.wrappedValue = Embedding(
+            embeddingCount: 2, dimensions: config.decoderConfig.hiddenSize)
 
         _acousticTokenizer.wrappedValue = VibeVoiceAcousticTokenizer(config.acousticTokenizerConfig)
 
@@ -146,7 +152,40 @@ public class VibeVoiceStreamInference {
     internal var ttsLmLastHidden: MLXArray?
     internal var negTtsLmLastHidden: MLXArray?
 
+    // Path to current voice cache for reloading between generations
+    private var currentVoiceCachePath: String?
+
+    // Snapshot storing raw data for true deep copies
+    private var voiceCacheSnapshot: VoiceCacheSnapshot?
+
+    private struct KVCacheData {
+        let keysData: [Float]
+        let keysShape: [Int]
+        let valuesData: [Float]
+        let valuesShape: [Int]
+    }
+
+    private struct VoiceCacheSnapshot {
+        let lmCacheData: [KVCacheData]
+        let ttsLmCacheData: [KVCacheData]
+        let negLmCacheData: [KVCacheData]
+        let negTtsLmCacheData: [KVCacheData]
+        let lmLastHiddenData: [Float]?
+        let lmLastHiddenShape: [Int]?
+        let ttsLmLastHiddenData: [Float]?
+        let ttsLmLastHiddenShape: [Int]?
+        let negTtsLmLastHiddenData: [Float]?
+        let negTtsLmLastHiddenShape: [Int]?
+    }
+
     private var cachedTimesteps: [Int32] = []
+    private var cachedTimestepArrays: [MLXArray] = []
+
+    // Pre-allocated buffers for diffusion loop to avoid per-iteration allocations
+    private var diffusionCombinedBuffer: MLXArray?
+    private var diffusionFullEpsBuffer: MLXArray?
+    private var diffusionBufferBatchSize: Int = 0
+    private var diffusionBufferLatentDim: Int = 0
 
     public init(model: VibeVoiceStreamModel, numInferenceSteps: Int = 20, cfgScale: Float = 3.0) {
         self.model = model
@@ -155,68 +194,200 @@ public class VibeVoiceStreamInference {
 
         model.noiseScheduler.setTimesteps(numInferenceSteps: numInferenceSteps)
         self.cachedTimesteps = model.noiseScheduler.timesteps.asArray(Int32.self)
+
+        // Precompute timestep arrays to avoid allocations in diffusion loop
+        self.cachedTimestepArrays = cachedTimesteps.map { t in
+            MLXArray([Float(t), Float(t)])
+        }
+        eval(cachedTimestepArrays)
+    }
+
+    /// Ensure diffusion buffers are allocated for the given dimensions
+    private func ensureDiffusionBuffers(batchSize: Int, latentDim: Int, dtype: DType) {
+        if diffusionCombinedBuffer == nil || diffusionBufferBatchSize != batchSize
+            || diffusionBufferLatentDim != latentDim
+        {
+            // Allocate buffers for doubled batch size (for CFG)
+            diffusionCombinedBuffer = MLXArray.zeros([batchSize * 2, latentDim], dtype: dtype)
+            diffusionFullEpsBuffer = MLXArray.zeros([batchSize * 2, latentDim], dtype: dtype)
+            diffusionBufferBatchSize = batchSize
+            diffusionBufferLatentDim = latentDim
+            eval(diffusionCombinedBuffer!, diffusionFullEpsBuffer!)
+        }
     }
 
     public func loadVoiceCache(from path: String) throws {
         let url = URL(fileURLWithPath: path)
 
+        // Clear cached attention masks in both language models to prevent stale mask reuse
+        model.languageModel.clearMaskCache()
+        model.ttsLanguageModel.clearMaskCache()
+
         let tensors = try MLX.loadArrays(url: url)
 
-        let lmLayers = model.config.decoderConfig.hiddenLayers - model.config.ttsBackboneNumHiddenLayers
+        let lmLayers =
+            model.config.decoderConfig.hiddenLayers - model.config.ttsBackboneNumHiddenLayers
         let ttsLmLayers = model.config.ttsBackboneNumHiddenLayers
 
-        lmCache = (0..<lmLayers).map { _ in KVCacheSimple() }
-        ttsLmCache = (0..<ttsLmLayers).map { _ in KVCacheSimple() }
-        negLmCache = (0..<lmLayers).map { _ in KVCacheSimple() }
-        negTtsLmCache = (0..<ttsLmLayers).map { _ in KVCacheSimple() }
+        lmCache = (0 ..< lmLayers).map { _ in KVCacheSimple() }
+        ttsLmCache = (0 ..< ttsLmLayers).map { _ in KVCacheSimple() }
+        negLmCache = (0 ..< lmLayers).map { _ in KVCacheSimple() }
+        negTtsLmCache = (0 ..< ttsLmLayers).map { _ in KVCacheSimple() }
+
+        // Precompute key strings to avoid repeated string interpolation
+        let lmKeys = (0 ..< lmLayers).map { ("lm_key_\($0)", "lm_value_\($0)") }
+        let ttsLmKeys = (0 ..< ttsLmLayers).map { ("tts_lm_key_\($0)", "tts_lm_value_\($0)") }
+        let negLmKeys = (0 ..< lmLayers).map { ("neg_lm_key_\($0)", "neg_lm_value_\($0)") }
+        let negTtsLmKeys = (0 ..< ttsLmLayers).map {
+            ("neg_tts_lm_key_\($0)", "neg_tts_lm_value_\($0)")
+        }
 
         lmLastHidden = tensors["lm_hidden"]
-        for i in 0..<lmLayers {
-            guard let key = tensors["lm_key_\(i)"], let value = tensors["lm_value_\(i)"] else {
-                throw VibeVoiceError.weightsMissing(key: "lm_key_\(i) or lm_value_\(i)")
+        for (i, (keyName, valueName)) in lmKeys.enumerated() {
+            guard let key = tensors[keyName], let value = tensors[valueName] else {
+                throw VibeVoiceError.weightsMissing(key: "\(keyName) or \(valueName)")
             }
             lmCache[i].initialize(keys: key, values: value)
         }
 
         ttsLmLastHidden = tensors["tts_lm_hidden"]
-        for i in 0..<ttsLmLayers {
-            guard let key = tensors["tts_lm_key_\(i)"], let value = tensors["tts_lm_value_\(i)"] else {
-                throw VibeVoiceError.weightsMissing(key: "tts_lm_key_\(i) or tts_lm_value_\(i)")
+        for (i, (keyName, valueName)) in ttsLmKeys.enumerated() {
+            guard let key = tensors[keyName], let value = tensors[valueName] else {
+                throw VibeVoiceError.weightsMissing(key: "\(keyName) or \(valueName)")
             }
             ttsLmCache[i].initialize(keys: key, values: value)
         }
 
-        for i in 0..<lmLayers {
-            guard let key = tensors["neg_lm_key_\(i)"], let value = tensors["neg_lm_value_\(i)"] else {
-                throw VibeVoiceError.weightsMissing(key: "neg_lm_key_\(i) or neg_lm_value_\(i)")
+        for (i, (keyName, valueName)) in negLmKeys.enumerated() {
+            guard let key = tensors[keyName], let value = tensors[valueName] else {
+                throw VibeVoiceError.weightsMissing(key: "\(keyName) or \(valueName)")
             }
             negLmCache[i].initialize(keys: key, values: value)
         }
 
         negTtsLmLastHidden = tensors["neg_tts_lm_hidden"]
-        for i in 0..<ttsLmLayers {
-            guard let key = tensors["neg_tts_lm_key_\(i)"], let value = tensors["neg_tts_lm_value_\(i)"] else {
-                throw VibeVoiceError.weightsMissing(key: "neg_tts_lm_key_\(i) or neg_tts_lm_value_\(i)")
+        for (i, (keyName, valueName)) in negTtsLmKeys.enumerated() {
+            guard let key = tensors[keyName], let value = tensors[valueName] else {
+                throw VibeVoiceError.weightsMissing(key: "\(keyName) or \(valueName)")
             }
             negTtsLmCache[i].initialize(keys: key, values: value)
         }
+
+        // Save path for reloading between generations
+        currentVoiceCachePath = path
+
+        // Save snapshot with raw data for fast restoration
+        voiceCacheSnapshot = VoiceCacheSnapshot(
+            lmCacheData: lmCache.compactMap { extractKVCacheData($0) },
+            ttsLmCacheData: ttsLmCache.compactMap { extractKVCacheData($0) },
+            negLmCacheData: negLmCache.compactMap { extractKVCacheData($0) },
+            negTtsLmCacheData: negTtsLmCache.compactMap { extractKVCacheData($0) },
+            lmLastHiddenData: lmLastHidden.map {
+                eval($0)
+                return $0.asArray(Float.self)
+            },
+            lmLastHiddenShape: lmLastHidden.map { $0.shape },
+            ttsLmLastHiddenData: ttsLmLastHidden.map {
+                eval($0)
+                return $0.asArray(Float.self)
+            },
+            ttsLmLastHiddenShape: ttsLmLastHidden.map { $0.shape },
+            negTtsLmLastHiddenData: negTtsLmLastHidden.map {
+                eval($0)
+                return $0.asArray(Float.self)
+            },
+            negTtsLmLastHiddenShape: negTtsLmLastHidden.map { $0.shape }
+        )
+    }
+
+    private func extractKVCacheData(_ cache: KVCacheSimple) -> KVCacheData? {
+        guard let keys = cache.keys, let values = cache.values else { return nil }
+        eval(keys, values)
+        return KVCacheData(
+            keysData: keys.asArray(Float.self),
+            keysShape: keys.shape,
+            valuesData: values.asArray(Float.self),
+            valuesShape: values.shape
+        )
     }
 
     public func resetCaches() {
-        let lmLayers = model.config.decoderConfig.hiddenLayers - model.config.ttsBackboneNumHiddenLayers
-        lmCache = (0..<lmLayers).map { _ in KVCacheSimple() }
-        ttsLmCache = (0..<model.config.ttsBackboneNumHiddenLayers).map { _ in KVCacheSimple() }
-        negLmCache = (0..<lmLayers).map { _ in KVCacheSimple() }
-        negTtsLmCache = (0..<model.config.ttsBackboneNumHiddenLayers).map { _ in KVCacheSimple() }
+        // Reset existing caches instead of recreating objects
+        for cache in lmCache { cache.reset() }
+        for cache in ttsLmCache { cache.reset() }
+        for cache in negLmCache { cache.reset() }
+        for cache in negTtsLmCache { cache.reset() }
 
         lmLastHidden = nil
         ttsLmLastHidden = nil
         negTtsLmLastHidden = nil
     }
 
+    /// Restores caches to their initial voice cache state from snapshot.
+    /// Call this before each generation to ensure clean state.
+    public func restoreVoiceCacheState() {
+        // Always clear mask caches first
+        model.languageModel.clearMaskCache()
+        model.ttsLanguageModel.clearMaskCache()
+
+        guard let snapshot = voiceCacheSnapshot else { return }
+
+        // Restore LM caches from raw data (creates fresh arrays)
+        for (i, data) in snapshot.lmCacheData.enumerated() where i < lmCache.count {
+            let keys = MLXArray(data.keysData).reshaped(data.keysShape)
+            let values = MLXArray(data.valuesData).reshaped(data.valuesShape)
+            lmCache[i].initialize(keys: keys, values: values)
+        }
+
+        // Restore TTS LM caches
+        for (i, data) in snapshot.ttsLmCacheData.enumerated() where i < ttsLmCache.count {
+            let keys = MLXArray(data.keysData).reshaped(data.keysShape)
+            let values = MLXArray(data.valuesData).reshaped(data.valuesShape)
+            ttsLmCache[i].initialize(keys: keys, values: values)
+        }
+
+        // Restore negative LM caches
+        for (i, data) in snapshot.negLmCacheData.enumerated() where i < negLmCache.count {
+            let keys = MLXArray(data.keysData).reshaped(data.keysShape)
+            let values = MLXArray(data.valuesData).reshaped(data.valuesShape)
+            negLmCache[i].initialize(keys: keys, values: values)
+        }
+
+        // Restore negative TTS LM caches
+        for (i, data) in snapshot.negTtsLmCacheData.enumerated() where i < negTtsLmCache.count {
+            let keys = MLXArray(data.keysData).reshaped(data.keysShape)
+            let values = MLXArray(data.valuesData).reshaped(data.valuesShape)
+            negTtsLmCache[i].initialize(keys: keys, values: values)
+        }
+
+        // Restore hidden states from raw data
+        if let data = snapshot.lmLastHiddenData, let shape = snapshot.lmLastHiddenShape {
+            lmLastHidden = MLXArray(data).reshaped(shape)
+        }
+        if let data = snapshot.ttsLmLastHiddenData, let shape = snapshot.ttsLmLastHiddenShape {
+            ttsLmLastHidden = MLXArray(data).reshaped(shape)
+        }
+        if let data = snapshot.negTtsLmLastHiddenData, let shape = snapshot.negTtsLmLastHiddenShape
+        {
+            negTtsLmLastHidden = MLXArray(data).reshaped(shape)
+        }
+
+        // Force evaluation to ensure all restored arrays are materialized
+        if let lmHidden = lmLastHidden, let ttsHidden = ttsLmLastHidden,
+            let negTtsHidden = negTtsLmLastHidden
+        {
+            eval(lmHidden, ttsHidden, negTtsHidden)
+        }
+
+        // Reset diffusion buffers to prevent any stale data
+        diffusionCombinedBuffer = nil
+        diffusionFullEpsBuffer = nil
+    }
+
     internal func forwardLM(inputIds: MLXArray, cache: inout [KVCacheSimple]) -> MLXArray {
         let embeddings = model.languageModel.embedTokens(inputIds)
-        return model.languageModel.forwardWithEmbeddings(embeddings, cache: cache, applyFinalNorm: false)
+        return model.languageModel.forwardWithEmbeddings(
+            embeddings, cache: cache, applyFinalNorm: false)
     }
 
     internal func forwardTTSLM(
@@ -229,7 +400,7 @@ public class VibeVoiceStreamInference {
 
         let startIdx = inputsEmbeds.dim(1) - lmHiddenState.dim(1)
         if startIdx > 0 {
-            let prefix = inputsEmbeds[0..., 0..<startIdx, 0...]
+            let prefix = inputsEmbeds[0..., 0 ..< startIdx, 0...]
             inputsEmbeds = concatenated([prefix, lmHiddenState], axis: 1)
         } else {
             inputsEmbeds = lmHiddenState
@@ -257,9 +428,13 @@ public class VibeVoiceStreamInference {
         maxSpeechTokens: Int,
         acousticCache: StreamingConvCache?,
         collectLatentsOnly: Bool
-    ) throws -> (scaledLatents: [MLXArray], audioChunks: [MLXArray], tokenCount: Int, eosDetected: Bool) {
+    ) throws -> (
+        scaledLatents: [MLXArray], audioChunks: [MLXArray], tokenCount: Int, eosDetected: Bool
+    ) {
         var scaledLatentChunks: [MLXArray] = []
         var audioChunks: [MLXArray] = []
+        scaledLatentChunks.reserveCapacity(maxSpeechTokens)
+        audioChunks.reserveCapacity(maxSpeechTokens)
         var tokenCount = 0
         var eosDetected = false
 
@@ -271,11 +446,10 @@ public class VibeVoiceStreamInference {
                 throw VibeVoiceError.modelNotInitialized(component: "Negative TTS LM hidden state")
             }
 
+            // Both hidden states have same sequence length, compute lastIdx once
             let lastIdx = ttsHidden.dim(1) - 1
-            let condition = ttsHidden[0..., lastIdx...(lastIdx), 0...].squeezed(axis: 1)
-
-            let negLastIdx = negTtsHidden.dim(1) - 1
-            let negCondition = negTtsHidden[0..., negLastIdx...(negLastIdx), 0...].squeezed(axis: 1)
+            let condition = ttsHidden[0..., lastIdx ... (lastIdx), 0...].squeezed(axis: 1)
+            let negCondition = negTtsHidden[0..., lastIdx ... (lastIdx), 0...].squeezed(axis: 1)
 
             let speechLatent2D = try sampleSpeechLatent(
                 condition: condition,
@@ -289,7 +463,8 @@ public class VibeVoiceStreamInference {
             if collectLatentsOnly {
                 scaledLatentChunks.append(scaledLatent)
             } else if let cache = acousticCache {
-                let audioChunk = model.acousticTokenizer.decode(scaledLatent, cache: cache, useCache: true)
+                let audioChunk = model.acousticTokenizer.decode(
+                    scaledLatent, cache: cache, useCache: true)
                 audioChunks.append(audioChunk)
             }
 
@@ -325,7 +500,7 @@ public class VibeVoiceStreamInference {
             throw VibeVoiceError.modelNotInitialized(component: "TTS LM")
         }
         let lastIdx = ttsHidden.dim(1) - 1
-        let eosHidden = ttsHidden[0..., lastIdx...(lastIdx), 0...].squeezed(axis: 1)
+        let eosHidden = ttsHidden[0..., lastIdx ... (lastIdx), 0...].squeezed(axis: 1)
 
         let eosLogits = model.eosClassifier(eosHidden)
         let eosProb = sigmoid(eosLogits)
@@ -335,7 +510,9 @@ public class VibeVoiceStreamInference {
         return prob > 0.5
     }
 
-    public func generateWithVoiceCache(tokenIds ttsTextIds: MLXArray, maxSpeechTokens: Int = 500) throws -> MLXArray {
+    public func generateWithVoiceCache(tokenIds ttsTextIds: MLXArray, maxSpeechTokens: Int = 500)
+        throws -> MLXArray
+    {
         let collector = AudioChunkCollector()
         let streamer = AudioStreamer()
         streamer.delegate = collector
@@ -356,6 +533,9 @@ public class VibeVoiceStreamInference {
     ) throws {
         defer { audioStreamer.finish() }
 
+        // Restore caches to initial voice cache state before each generation
+        restoreVoiceCacheState()
+
         guard ttsLmLastHidden != nil, negTtsLmLastHidden != nil else {
             throw VibeVoiceError.voiceCacheNotLoaded
         }
@@ -371,10 +551,11 @@ public class VibeVoiceStreamInference {
 
         while !finished && !audioStreamer.cancelled {
             let windowStart = textWindowIndex * TTSConstants.textWindowSize
-            let windowEnd = min((textWindowIndex + 1) * TTSConstants.textWindowSize, totalTextTokens)
+            let windowEnd = min(
+                (textWindowIndex + 1) * TTSConstants.textWindowSize, totalTextTokens)
 
             if windowStart < totalTextTokens {
-                let curTextIds = ttsTextIds[0..., windowStart..<windowEnd]
+                let curTextIds = ttsTextIds[0..., windowStart ..< windowEnd]
                 let curWindowSize = windowEnd - windowStart
 
                 if curWindowSize > 0 {
@@ -396,7 +577,7 @@ public class VibeVoiceStreamInference {
                 textWindowIndex += 1
             }
 
-            for _ in 0..<TTSConstants.speechWindowSize {
+            for _ in 0 ..< TTSConstants.speechWindowSize {
                 if totalGeneratedSpeech >= maxSpeechTokens || audioStreamer.cancelled {
                     finished = true
                     break
@@ -406,14 +587,16 @@ public class VibeVoiceStreamInference {
                     throw VibeVoiceError.modelNotInitialized(component: "TTS LM hidden state")
                 }
                 guard let negTtsHidden = negTtsLmLastHidden else {
-                    throw VibeVoiceError.modelNotInitialized(component: "Negative TTS LM hidden state")
+                    throw VibeVoiceError.modelNotInitialized(
+                        component: "Negative TTS LM hidden state")
                 }
 
                 let lastIdx = ttsHidden.dim(1) - 1
-                let condition = ttsHidden[0..., lastIdx...(lastIdx), 0...].squeezed(axis: 1)
+                let condition = ttsHidden[0..., lastIdx ... (lastIdx), 0...].squeezed(axis: 1)
 
                 let negLastIdx = negTtsHidden.dim(1) - 1
-                let negCondition = negTtsHidden[0..., negLastIdx...(negLastIdx), 0...].squeezed(axis: 1)
+                let negCondition = negTtsHidden[0..., negLastIdx ... (negLastIdx), 0...].squeezed(
+                    axis: 1)
 
                 let speechLatent2D = try sampleSpeechLatent(
                     condition: condition,
@@ -424,7 +607,8 @@ public class VibeVoiceStreamInference {
 
                 let scaledLatent = speechLatent / model.speechScalingFactor - model.speechBiasFactor
 
-                let audioChunk = model.acousticTokenizer.decode(scaledLatent, cache: acousticCache, useCache: true)
+                let audioChunk = model.acousticTokenizer.decode(
+                    scaledLatent, cache: acousticCache, useCache: true)
 
                 eval(audioChunk)
                 audioStreamer.emit(chunk: audioChunk, index: totalGeneratedSpeech)
@@ -451,7 +635,9 @@ public class VibeVoiceStreamInference {
         }
     }
 
-    public func generate(tokenIds ttsTextIds: MLXArray, maxSpeechTokens: Int = 500) throws -> MLXArray {
+    public func generate(tokenIds ttsTextIds: MLXArray, maxSpeechTokens: Int = 500) throws
+        -> MLXArray
+    {
         resetCaches()
 
         let batchSize = ttsTextIds.dim(0)
@@ -470,20 +656,26 @@ public class VibeVoiceStreamInference {
 
         let acousticCache = StreamingConvCache()
 
-        var audioChunks: [MLXArray] = []
+        // Pre-allocate audio buffer based on expected size (samples per token * max tokens)
+        let samplesPerToken = model.config.acousticTokenizerConfig.hopLength
+        let maxExpectedSamples = maxSpeechTokens * samplesPerToken
+        let audioBuffer = MLXArray.zeros([batchSize, 1, maxExpectedSamples], dtype: .float32)
+        var audioOffset = 0
+
         var textWindowIndex = 0
         var totalGeneratedSpeech = 0
         var finished = false
 
         while !finished {
             let windowStart = textWindowIndex * TTSConstants.textWindowSize
-            let windowEnd = min((textWindowIndex + 1) * TTSConstants.textWindowSize, totalTextTokens)
+            let windowEnd = min(
+                (textWindowIndex + 1) * TTSConstants.textWindowSize, totalTextTokens)
 
             if windowStart >= totalTextTokens {
                 break
             }
 
-            let curTextIds = ttsTextIds[0..., windowStart..<windowEnd]
+            let curTextIds = ttsTextIds[0..., windowStart ..< windowEnd]
             let curWindowSize = windowEnd - windowStart
 
             if curWindowSize > 0 {
@@ -508,7 +700,7 @@ public class VibeVoiceStreamInference {
 
             textWindowIndex += 1
 
-            for _ in 0..<TTSConstants.speechWindowSize {
+            for _ in 0 ..< TTSConstants.speechWindowSize {
                 if totalGeneratedSpeech >= maxSpeechTokens {
                     finished = true
                     break
@@ -520,7 +712,15 @@ public class VibeVoiceStreamInference {
                     collectLatentsOnly: false
                 )
 
-                audioChunks.append(contentsOf: chunks)
+                // Write chunks directly to pre-allocated buffer instead of accumulating
+                for chunk in chunks {
+                    let chunkSamples = chunk.dim(-1)
+                    if audioOffset + chunkSamples <= maxExpectedSamples {
+                        audioBuffer[0..., 0..., audioOffset ..< (audioOffset + chunkSamples)] =
+                            chunk
+                        audioOffset += chunkSamples
+                    }
+                }
                 totalGeneratedSpeech += count
 
                 if eosDetected {
@@ -530,53 +730,76 @@ public class VibeVoiceStreamInference {
             }
         }
 
-        if audioChunks.isEmpty {
+        if audioOffset == 0 {
             return MLXArray.zeros([batchSize, 1, 0])
         }
 
-        let audio = concatenated(audioChunks, axis: -1)
+        // Trim buffer to actual size (no final concatenation needed)
+        let audio = audioBuffer[0..., 0..., 0 ..< audioOffset]
         eval(audio)
         return audio
     }
 
-    internal func sampleSpeechLatent(condition: MLXArray, negCondition: MLXArray) throws -> MLXArray {
+    internal func sampleSpeechLatent(condition: MLXArray, negCondition: MLXArray) throws -> MLXArray
+    {
         let batchSize = condition.dim(0)
         let latentDim = model.config.diffusionHeadConfig.latentSize
 
         model.noiseScheduler.reset()
 
+        // Ensure pre-allocated buffers are ready
+        ensureDiffusionBuffers(batchSize: batchSize, latentDim: latentDim, dtype: condition.dtype)
+
+        // Cache combined condition - only computed once per call
         let combinedCond = concatenated([condition, negCondition], axis: 0)
+        eval(combinedCond)
 
         var speech = MLXRandom.normal([batchSize, latentDim], dtype: condition.dtype)
         var prevX0: MLXArray? = nil
 
-        for stepIdx in 0..<numInferenceSteps {
-            let tVal = Float(cachedTimesteps[stepIdx])
-            let timesteps = MLXArray([tVal, tVal])
+        // Get references to pre-allocated buffers
+        guard let combinedBuffer = diffusionCombinedBuffer,
+            let fullEpsBuffer = diffusionFullEpsBuffer
+        else {
+            throw VibeVoiceError.modelNotInitialized(component: "Diffusion buffers")
+        }
 
-            let combined = concatenated([speech, speech], axis: 0)
+        for stepIdx in 0 ..< numInferenceSteps {
+            // Use precomputed timestep array instead of allocating each iteration
+            let timesteps = cachedTimestepArrays[stepIdx]
+
+            // Reuse pre-allocated buffer instead of concatenating
+            combinedBuffer[0 ..< batchSize] = speech
+            combinedBuffer[batchSize...] = speech
 
             let eps = model.predictionHead(
-                noisyImages: combined,
+                noisyImages: combinedBuffer,
                 timesteps: timesteps,
                 condition: combinedCond
             )
 
-            let condEps = eps[0..<batchSize]
+            let condEps = eps[0 ..< batchSize]
             let uncondEps = eps[batchSize...]
             let guidedEps = uncondEps + cfgScale * (condEps - uncondEps)
 
-            let fullEps = concatenated([guidedEps, guidedEps], axis: 0)
+            // Reuse pre-allocated buffer instead of concatenating
+            fullEpsBuffer[0 ..< batchSize] = guidedEps
+            fullEpsBuffer[batchSize...] = guidedEps
 
             let (newSpeech, x0Pred) = try model.noiseScheduler.stepGPU(
-                modelOutput: fullEps,
+                modelOutput: fullEpsBuffer,
                 stepIdx: stepIdx,
-                sample: concatenated([speech, speech], axis: 0),
+                sample: combinedBuffer,
                 prevX0: prevX0
             )
 
-            speech = newSpeech[0..<batchSize]
-            prevX0 = x0Pred[0..<batchSize]
+            speech = newSpeech[0 ..< batchSize]
+            prevX0 = x0Pred[0 ..< batchSize]
+
+            // Periodic eval to cap computation graph growth
+            if stepIdx % 5 == 4 {
+                eval(speech)
+            }
         }
 
         return speech
@@ -621,7 +844,7 @@ public class VibeVoiceStreamInference {
 
         var prevX0: MLXArray? = nil
 
-        for stepIdx in 0..<numInferenceSteps {
+        for stepIdx in 0 ..< numInferenceSteps {
             let tVal = Float(cachedTimesteps[stepIdx])
             let timesteps = MLXArray.ones([batchSize]) * tVal
 
@@ -637,7 +860,7 @@ public class VibeVoiceStreamInference {
                     condition: combinedCond
                 )
 
-                let condOutput = combinedOutput[0..<batchSize]
+                let condOutput = combinedOutput[0 ..< batchSize]
                 let uncondOutput = combinedOutput[batchSize...]
                 modelOutput = uncondOutput + cfgScale * (condOutput - uncondOutput)
             } else {
@@ -667,7 +890,11 @@ public class VibeVoiceStreamInference {
         return latents / model.speechScalingFactor - model.speechBiasFactor
     }
 
-    public func createStreamingSession(audioStreamer: AudioStreamer) throws -> StreamingTextSession {
+    public func createStreamingSession(audioStreamer: AudioStreamer) throws -> StreamingTextSession
+    {
+        // Restore caches to initial voice cache state before each generation session
+        restoreVoiceCacheState()
+
         guard ttsLmLastHidden != nil, negTtsLmLastHidden != nil else {
             throw VibeVoiceError.voiceCacheNotLoaded
         }
@@ -724,7 +951,7 @@ public class StreamingTextSession {
         let tokenIds = MLXArray(windowTokens).reshaped([1, windowTokens.count])
         try processTextTokens(tokenIds)
 
-        for _ in 0..<TTSConstants.speechWindowSize {
+        for _ in 0 ..< TTSConstants.speechWindowSize {
             if audioStreamer.cancelled {
                 isFinished = true
                 break
@@ -748,7 +975,7 @@ public class StreamingTextSession {
             1,
             (remainingTokenCount * TTSConstants.speechWindowSize) / TTSConstants.textWindowSize
         )
-        for _ in 0..<speechTokensToGenerate {
+        for _ in 0 ..< speechTokensToGenerate {
             if audioStreamer.cancelled {
                 isFinished = true
                 break
@@ -792,10 +1019,10 @@ public class StreamingTextSession {
         }
 
         let lastIdx = ttsHidden.dim(1) - 1
-        let condition = ttsHidden[0..., lastIdx...(lastIdx), 0...].squeezed(axis: 1)
+        let condition = ttsHidden[0..., lastIdx ... (lastIdx), 0...].squeezed(axis: 1)
 
         let negLastIdx = negTtsHidden.dim(1) - 1
-        let negCondition = negTtsHidden[0..., negLastIdx...(negLastIdx), 0...].squeezed(axis: 1)
+        let negCondition = negTtsHidden[0..., negLastIdx ... (negLastIdx), 0...].squeezed(axis: 1)
 
         let speechLatent2D = try inference.sampleSpeechLatent(
             condition: condition,
@@ -804,9 +1031,11 @@ public class StreamingTextSession {
 
         let speechLatent = expandedDimensions(speechLatent2D, axis: 1)
 
-        let scaledLatent = speechLatent / inference.model.speechScalingFactor - inference.model.speechBiasFactor
+        let scaledLatent =
+            speechLatent / inference.model.speechScalingFactor - inference.model.speechBiasFactor
 
-        let audioChunk = inference.model.acousticTokenizer.decode(scaledLatent, cache: acousticCache, useCache: true)
+        let audioChunk = inference.model.acousticTokenizer.decode(
+            scaledLatent, cache: acousticCache, useCache: true)
 
         eval(audioChunk)
         audioStreamer.emit(chunk: audioChunk, index: totalGeneratedSpeech)

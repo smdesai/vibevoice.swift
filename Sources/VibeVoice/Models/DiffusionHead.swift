@@ -33,9 +33,13 @@ public struct DiffusionHeadConfiguration: Codable, Sendable {
         self.headFfnRatio = try container.decodeIfPresent(Float.self, forKey: .headFfnRatio) ?? 3.0
         self.rmsNormEps = try container.decodeIfPresent(Float.self, forKey: .rmsNormEps) ?? 1e-5
         self.ddpmNumSteps = try container.decodeIfPresent(Int.self, forKey: .ddpmNumSteps) ?? 1000
-        self.ddpmNumInferenceSteps = try container.decodeIfPresent(Int.self, forKey: .ddpmNumInferenceSteps) ?? 20
-        self.ddpmBetaSchedule = try container.decodeIfPresent(BetaSchedule.self, forKey: .ddpmBetaSchedule) ?? .cosine
-        self.predictionType = try container.decodeIfPresent(PredictionType.self, forKey: .predictionType) ?? .vPrediction
+        self.ddpmNumInferenceSteps =
+            try container.decodeIfPresent(Int.self, forKey: .ddpmNumInferenceSteps) ?? 20
+        self.ddpmBetaSchedule =
+            try container.decodeIfPresent(BetaSchedule.self, forKey: .ddpmBetaSchedule) ?? .cosine
+        self.predictionType =
+            try container.decodeIfPresent(PredictionType.self, forKey: .predictionType)
+            ?? .vPrediction
     }
 
     public init(
@@ -150,7 +154,8 @@ public class FinalLayer: Module {
     public init(hiddenSize: Int, outputSize: Int, condSize: Int, normEps: Float = 1e-5) {
         self.normFinal = RMSNorm(dimensions: hiddenSize, eps: normEps)
         _linear.wrappedValue = Linear(hiddenSize, outputSize, bias: false)
-        _adaLNModulation.wrappedValue = FinalAdaLNModulation(condSize: condSize, hiddenSize: hiddenSize)
+        _adaLNModulation.wrappedValue = FinalAdaLNModulation(
+            condSize: condSize, hiddenSize: hiddenSize)
 
         super.init()
     }
@@ -188,13 +193,14 @@ public class VibeVoiceDiffusionHead: Module {
         let ffnDim = Int(Float(config.hiddenSize) * config.headFfnRatio)
 
         var layersList: [HeadLayer] = []
-        for _ in 0..<config.headLayers {
-            layersList.append(HeadLayer(
-                embedDim: config.hiddenSize,
-                ffnDim: ffnDim,
-                condDim: condDim,
-                normEps: config.rmsNormEps
-            ))
+        for _ in 0 ..< config.headLayers {
+            layersList.append(
+                HeadLayer(
+                    embedDim: config.hiddenSize,
+                    ffnDim: ffnDim,
+                    condDim: condDim,
+                    normEps: config.rmsNormEps
+                ))
         }
         _layers.wrappedValue = layersList
 

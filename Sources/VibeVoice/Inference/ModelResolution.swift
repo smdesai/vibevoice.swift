@@ -54,7 +54,10 @@ public struct ModelResolution {
             return false
         }
 
-        let pathIndicators = ["models", "model", "weights", "data", "datasets", "checkpoints", "output", "tmp", "temp", "cache"]
+        let pathIndicators = [
+            "models", "model", "weights", "data", "datasets", "checkpoints", "output", "tmp",
+            "temp", "cache",
+        ]
         if pathIndicators.contains(org.lowercased()) {
             return false
         }
@@ -106,7 +109,8 @@ public struct ModelResolution {
             )
         }
 
-        if let cachedURL = findCachedModel(modelId: defaultModelId, requireWeights: requireWeights) {
+        if let cachedURL = findCachedModel(modelId: defaultModelId, requireWeights: requireWeights)
+        {
             return cachedURL
         }
 
@@ -150,15 +154,23 @@ public struct ModelResolution {
             return URL(fileURLWithPath: hfHome).appendingPathComponent("hub")
         }
 
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser
-        return homeDir.appendingPathComponent(".cache/huggingface/hub")
+        #if os(iOS) || os(tvOS) || os(watchOS) || os(visionOS)
+            // On iOS, use the app's Caches directory
+            let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)
+                .first!
+            return cacheDir.appendingPathComponent("huggingface/hub")
+        #else
+            let homeDir = FileManager.default.homeDirectoryForCurrentUser
+            return homeDir.appendingPathComponent(".cache/huggingface/hub")
+        #endif
     }
 
     public static func findCachedModel(modelId: String, requireWeights: Bool = true) -> URL? {
         let fm = FileManager.default
         let cacheDir = getHuggingFaceCacheDirectory()
 
-        let modelCachePath = cacheDir
+        let modelCachePath =
+            cacheDir
             .appendingPathComponent("models--\(modelId.replacingOccurrences(of: "/", with: "--"))")
             .appendingPathComponent("snapshots")
 
@@ -166,17 +178,23 @@ public struct ModelResolution {
             return nil
         }
 
-        guard let snapshots = try? fm.contentsOfDirectory(
-            at: modelCachePath,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        ) else {
+        guard
+            let snapshots = try? fm.contentsOfDirectory(
+                at: modelCachePath,
+                includingPropertiesForKeys: [.contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            )
+        else {
             return nil
         }
 
         let sortedSnapshots = snapshots.sorted { a, b in
-            let aDate = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-            let bDate = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let aDate =
+                (try? a.resourceValues(forKeys: [.contentModificationDateKey])
+                    .contentModificationDate) ?? .distantPast
+            let bDate =
+                (try? b.resourceValues(forKeys: [.contentModificationDateKey])
+                    .contentModificationDate) ?? .distantPast
             return aDate > bDate
         }
 
@@ -188,7 +206,9 @@ public struct ModelResolution {
             }
 
             if requireWeights {
-                let contents = (try? fm.contentsOfDirectory(at: snapshot, includingPropertiesForKeys: nil)) ?? []
+                let contents =
+                    (try? fm.contentsOfDirectory(at: snapshot, includingPropertiesForKeys: nil))
+                    ?? []
                 let hasSafetensors = contents.contains { $0.pathExtension == "safetensors" }
 
                 if !hasSafetensors {
@@ -210,7 +230,9 @@ public struct ModelResolution {
     ) async throws -> URL {
         let repo = Hub.Repo(id: modelId)
 
-        var patterns: [String] = ["config.json", "tokenizer.json", "tokenizer_config.json", "quantization.json"]
+        var patterns: [String] = [
+            "config.json", "tokenizer.json", "tokenizer_config.json", "quantization.json",
+        ]
         if requireWeights {
             patterns.append("*.safetensors")
         }
@@ -225,7 +247,7 @@ public struct ModelResolution {
                     print("\rDownloading \(modelId): \(percent)%", terminator: "")
                     fflush(stdout)
                     if progress.isFinished {
-                        print() 
+                        print()
                     }
                 }
             )

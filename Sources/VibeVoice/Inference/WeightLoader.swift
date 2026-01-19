@@ -27,7 +27,8 @@ func materializeWeights(_ weights: [String: MLXArray]) -> [String: MLXArray] {
 
 func loadWeightsFromDirectory(_ directory: URL) throws -> [String: MLXArray] {
     let fileManager = FileManager.default
-    let contents = try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+    let contents = try fileManager.contentsOfDirectory(
+        at: directory, includingPropertiesForKeys: nil)
 
     var allWeights: [String: MLXArray] = [:]
 
@@ -45,7 +46,8 @@ func loadWeightsFromDirectory(_ directory: URL) throws -> [String: MLXArray] {
 
 private func mapCommonWeightKeys(_ key: String) -> String {
     var newKey = key
-    newKey = newKey.replacingOccurrences(of: "adaLN_modulation.1.", with: "adaLN_modulation.linear.")
+    newKey = newKey.replacingOccurrences(
+        of: "adaLN_modulation.1.", with: "adaLN_modulation.linear.")
     newKey = newKey.replacingOccurrences(of: "t_embedder.mlp.0.", with: "t_embedder.mlp.linear1.")
     newKey = newKey.replacingOccurrences(of: "t_embedder.mlp.2.", with: "t_embedder.mlp.linear2.")
     return newKey
@@ -53,15 +55,19 @@ private func mapCommonWeightKeys(_ key: String) -> String {
 
 private let decoderStageOffsets: [Int] = [0, 8, 11, 14, 17, 20, 23]
 
+// Static regex to avoid recompilation on every weight key
+private let stagesRegex: NSRegularExpression? = try? NSRegularExpression(
+    pattern: #"\.stages\.(\d+)\.(\d+)\."#)
+
 private func flattenDecoderStagesKey(_ key: String) -> String {
-    let pattern = #"\.stages\.(\d+)\.(\d+)\."#
-    guard let regex = try? NSRegularExpression(pattern: pattern),
-          let match = regex.firstMatch(in: key, range: NSRange(key.startIndex..., in: key)),
-          let stageRange = Range(match.range(at: 1), in: key),
-          let blockRange = Range(match.range(at: 2), in: key),
-          let stageIdx = Int(key[stageRange]),
-          let blockIdx = Int(key[blockRange]),
-          stageIdx < decoderStageOffsets.count else {
+    guard let regex = stagesRegex,
+        let match = regex.firstMatch(in: key, range: NSRange(key.startIndex..., in: key)),
+        let stageRange = Range(match.range(at: 1), in: key),
+        let blockRange = Range(match.range(at: 2), in: key),
+        let stageIdx = Int(key[stageRange]),
+        let blockIdx = Int(key[blockRange]),
+        stageIdx < decoderStageOffsets.count
+    else {
         return key
     }
 
@@ -77,7 +83,8 @@ private func mapDecoderWeightKeys(_ key: String) -> String {
         let match = newKey[range]
         if let indexMatch = match.range(of: #"\d+"#, options: .regularExpression) {
             let index = String(match[indexMatch])
-            newKey = newKey.replacingOccurrences(of: ".upsampleLayers.\(index).0.", with: ".upsampleLayers.\(index).")
+            newKey = newKey.replacingOccurrences(
+                of: ".upsampleLayers.\(index).0.", with: ".upsampleLayers.\(index).")
         }
     }
     newKey = newKey.replacingOccurrences(of: ".mixer.conv.conv.conv.", with: ".mixer.conv.")
@@ -94,11 +101,14 @@ private func mapDecoderWeightKeys(_ key: String) -> String {
 private func mapEncoderWeightKeys(_ key: String) -> String {
     var newKey = key
     newKey = newKey.replacingOccurrences(of: ".downsample_layers.", with: ".downsample_layers.")
-    if let range = newKey.range(of: #"\.downsample_layers\.(\d+)\.0\."#, options: .regularExpression) {
+    if let range = newKey.range(
+        of: #"\.downsample_layers\.(\d+)\.0\."#, options: .regularExpression)
+    {
         let match = newKey[range]
         if let indexMatch = match.range(of: #"\d+"#, options: .regularExpression) {
             let index = String(match[indexMatch])
-            newKey = newKey.replacingOccurrences(of: ".downsample_layers.\(index).0.", with: ".downsample_layers.\(index).")
+            newKey = newKey.replacingOccurrences(
+                of: ".downsample_layers.\(index).0.", with: ".downsample_layers.\(index).")
         }
     }
     newKey = newKey.replacingOccurrences(of: ".mixer.conv.conv.conv.", with: ".mixer.conv.")
@@ -155,9 +165,9 @@ func transposeConv1dWeights(_ weights: [String: MLXArray]) -> [String: MLXArray]
     var transposed: [String: MLXArray] = [:]
 
     for (key, value) in weights {
-        if key.contains("acoustic_tokenizer.decoder.") &&
-           key.hasSuffix(".weight") &&
-           value.ndim == 3 {
+        if key.contains("acoustic_tokenizer.decoder.") && key.hasSuffix(".weight")
+            && value.ndim == 3
+        {
 
             if key.contains(".convtr.") {
                 let transposedWeight = value.transposed(1, 2, 0)
@@ -166,14 +176,12 @@ func transposeConv1dWeights(_ weights: [String: MLXArray]) -> [String: MLXArray]
                 let transposedWeight = value.transposed(0, 2, 1)
                 transposed[key] = transposedWeight
             }
-        }
-        else if key.contains("acoustic_tokenizer.encoder.") &&
-                key.hasSuffix(".weight") &&
-                value.ndim == 3 {
+        } else if key.contains("acoustic_tokenizer.encoder.") && key.hasSuffix(".weight")
+            && value.ndim == 3
+        {
             let transposedWeight = value.transposed(0, 2, 1)
             transposed[key] = transposedWeight
-        }
-        else {
+        } else {
             transposed[key] = value
         }
     }
@@ -252,7 +260,9 @@ private func loadHeadWeightsForDecoder(_ decoder: TokenizerDecoder, weights: [St
     }
 }
 
-private func loadUpsampleLayersWeightsForDecoder(_ decoder: TokenizerDecoder, weights: [String: MLXArray]) {
+private func loadUpsampleLayersWeightsForDecoder(
+    _ decoder: TokenizerDecoder, weights: [String: MLXArray]
+) {
     for (idx, layer) in decoder.upsampleLayers.enumerated() {
         if let sconv = layer as? SConv1d {
             let weightKey = "acoustic_tokenizer.decoder.upsampleLayers.\(idx).conv.weight"
@@ -313,12 +323,16 @@ public func loadVibeVoiceStreamModel(from directory: URL) throws -> VibeVoiceStr
     }
 
     var weights = try loadWeightsFromDirectory(directory)
-    weights = materializeWeights(weights)
+    // Skip early materializeWeights - final eval(allParams) will materialize everything
 
     let scalingFactor = weights["model.speech_scaling_factor"]
     let biasFactor = weights["model.speech_bias_factor"]
 
-    weights = weights.filter { !$0.key.contains("rotary_emb.inv_freq") }
+    // Remove rotary embedding keys in-place instead of filtering entire dictionary
+    let keysToRemove = weights.keys.filter { $0.contains("rotary_emb.inv_freq") }
+    for key in keysToRemove {
+        weights.removeValue(forKey: key)
+    }
 
     var mappedWeights = mapVibeVoiceWeightKeys(weights)
     mappedWeights = transposeConv1dWeights(mappedWeights)
@@ -356,7 +370,7 @@ public func loadVibeVoiceStreamModel(from directory: URL) throws -> VibeVoiceStr
         model.noiseScheduler.alphaT,
         model.noiseScheduler.sigmaT,
         model.noiseScheduler.lambdaT,
-        model.noiseScheduler.sigmas
+        model.noiseScheduler.sigmas,
     ])
 
     return model
@@ -364,7 +378,9 @@ public func loadVibeVoiceStreamModel(from directory: URL) throws -> VibeVoiceStr
 
 extension VibeVoiceStreamModel {
     public static func fromPretrained(modelId: String) throws -> VibeVoiceStreamModel {
-        guard let cachedURL = ModelResolution.findCachedModel(modelId: modelId, requireWeights: true) else {
+        guard
+            let cachedURL = ModelResolution.findCachedModel(modelId: modelId, requireWeights: true)
+        else {
             throw ModelResolutionError.cacheNotFound(modelId)
         }
         return try loadVibeVoiceStreamModel(from: cachedURL)

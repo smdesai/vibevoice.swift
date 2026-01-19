@@ -13,8 +13,10 @@ public class Qwen2TransformerBlock: Module {
     public init(_ config: Qwen2Configuration) {
         _attention.wrappedValue = Qwen2Attention(config)
         self.mlp = Qwen2MLP(config)
-        _inputLayerNorm.wrappedValue = RMSNorm(dimensions: config.hiddenSize, eps: config.rmsNormEps)
-        _postAttentionLayerNorm.wrappedValue = RMSNorm(dimensions: config.hiddenSize, eps: config.rmsNormEps)
+        _inputLayerNorm.wrappedValue = RMSNorm(
+            dimensions: config.hiddenSize, eps: config.rmsNormEps)
+        _postAttentionLayerNorm.wrappedValue = RMSNorm(
+            dimensions: config.hiddenSize, eps: config.rmsNormEps)
         super.init()
     }
 

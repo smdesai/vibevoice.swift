@@ -212,8 +212,8 @@ public class SConv1d: Module {
         let maxReflect = length - 1
 
         if padSize <= maxReflect {
-            let slice = x[0..., 0..., 1..<(padSize + 1)]
-            let indices = MLXArray((0..<padSize).reversed().map { Int32($0) })
+            let slice = x[0..., 0..., 1 ..< (padSize + 1)]
+            let indices = MLXArray((0 ..< padSize).reversed().map { Int32($0) })
             return slice.take(indices, axis: 2)
         } else {
             var parts: [MLXArray] = []
@@ -223,8 +223,8 @@ public class SConv1d: Module {
 
             while remaining > 0 {
                 let take = min(remaining, maxReflect)
-                let slice = x[0..., 0..., 1..<(take + 1)]
-                let indices = MLXArray((0..<take).reversed().map { Int32($0) })
+                let slice = x[0..., 0..., 1 ..< (take + 1)]
+                let indices = MLXArray((0 ..< take).reversed().map { Int32($0) })
                 let reversed = slice.take(indices, axis: 2)
                 parts.append(reversed)
                 remaining -= take
@@ -241,8 +241,8 @@ public class SConv1d: Module {
         if padSize <= maxReflect {
             let startIdx = length - padSize - 1
             let endIdx = length - 1
-            let slice = x[0..., 0..., startIdx..<endIdx]
-            let indices = MLXArray((0..<padSize).reversed().map { Int32($0) })
+            let slice = x[0..., 0..., startIdx ..< endIdx]
+            let indices = MLXArray((0 ..< padSize).reversed().map { Int32($0) })
             return slice.take(indices, axis: 2)
         } else {
             var parts: [MLXArray] = []
@@ -254,8 +254,8 @@ public class SConv1d: Module {
                 let take = min(remaining, maxReflect)
                 let startIdx = length - take - 1
                 let endIdx = length - 1
-                let slice = x[0..., 0..., startIdx..<endIdx]
-                let indices = MLXArray((0..<take).reversed().map { Int32($0) })
+                let slice = x[0..., 0..., startIdx ..< endIdx]
+                let indices = MLXArray((0 ..< take).reversed().map { Int32($0) })
                 let reversed = slice.take(indices, axis: 2)
                 parts.append(reversed)
                 remaining -= take
@@ -347,7 +347,7 @@ public class SConvTranspose1d: Module {
 
         if paddingLeft + paddingRight > 0 {
             let end = output.dim(2) - paddingRight
-            output = output[0..., 0..., paddingLeft..<end]
+            output = output[0..., 0..., paddingLeft ..< end]
         }
 
         return output
@@ -377,7 +377,7 @@ public class SConvTranspose1d: Module {
 
         if paddingLeft + paddingRight > 0 {
             let end = fullOutput.dim(2) - paddingRight
-            fullOutput = fullOutput[0..., 0..., paddingLeft..<end]
+            fullOutput = fullOutput[0..., 0..., paddingLeft ..< end]
         }
 
         let output: MLXArray

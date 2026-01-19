@@ -69,7 +69,9 @@ public class Block1D: Module {
         super.init()
     }
 
-    public func callAsFunction(_ x: MLXArray, cache: StreamingConvCache? = nil, useCache: Bool = false) -> MLXArray {
+    public func callAsFunction(
+        _ x: MLXArray, cache: StreamingConvCache? = nil, useCache: Bool = false
+    ) -> MLXArray {
         var residual = x
         var out = norm(x)
         out = mixer(out, cache: cache, useCache: useCache)
@@ -138,7 +140,7 @@ public class TokenizerDecoder: Module {
         )
         upsampleLayersList.append(stem)
 
-        for i in 0..<ratios.count {
+        for i in 0 ..< ratios.count {
             let inCh = nFilters * Int(pow(2.0, Double(numStages - 1 - i)))
             let outCh = nFilters * Int(pow(2.0, Double(numStages - 1 - i - 1)))
             let upsample = SConvTranspose1d(
@@ -155,20 +157,21 @@ public class TokenizerDecoder: Module {
 
         var blocksList: [Block1D] = []
         var offsets: [Int] = []
-        for i in 0..<numStages {
+        for i in 0 ..< numStages {
             offsets.append(blocksList.count)
             let inCh = nFilters * Int(pow(2.0, Double(numStages - 1 - i)))
-            for _ in 0..<depths[i] {
-                blocksList.append(Block1D(
-                    dim: inCh,
-                    kernelSize: 7,
-                    mixerLayer: config.mixerLayer,
-                    layerScaleInitValue: config.layerScaleInitValue,
-                    causal: causal,
-                    padMode: config.padMode,
-                    bias: config.convBias,
-                    eps: config.layernormEps
-                ))
+            for _ in 0 ..< depths[i] {
+                blocksList.append(
+                    Block1D(
+                        dim: inCh,
+                        kernelSize: 7,
+                        mixerLayer: config.mixerLayer,
+                        layerScaleInitValue: config.layerScaleInitValue,
+                        causal: causal,
+                        padMode: config.padMode,
+                        bias: config.convBias,
+                        eps: config.layernormEps
+                    ))
             }
         }
         _blocks.wrappedValue = blocksList
@@ -195,15 +198,17 @@ public class TokenizerDecoder: Module {
         super.init()
     }
 
-    public func callAsFunction(_ x: MLXArray, cache: StreamingConvCache? = nil, useCache: Bool = false) -> MLXArray {
+    public func callAsFunction(
+        _ x: MLXArray, cache: StreamingConvCache? = nil, useCache: Bool = false
+    ) -> MLXArray {
         var out = x
 
-        for i in 0..<depths.count {
+        for i in 0 ..< depths.count {
             out = upsampleLayers[i].callAsFunction(out, cache: cache, useCache: useCache)
 
             let startIdx = stageOffsets[i]
             let endIdx = (i + 1 < stageOffsets.count) ? stageOffsets[i + 1] : blocks.count
-            for blockIdx in startIdx..<endIdx {
+            for blockIdx in startIdx ..< endIdx {
                 out = blocks[blockIdx](out, cache: cache, useCache: useCache)
             }
         }

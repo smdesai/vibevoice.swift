@@ -10,6 +10,11 @@ public class Qwen2Model: Module {
     public let layers: [Qwen2TransformerBlock]
     public let norm: RMSNorm
 
+    // Cached mask to avoid recreation when n and offset match
+    private var cachedMaskN: Int = 0
+    private var cachedMaskOffset: Int = 0
+    private var cachedMask: MLXArray?
+
     public init(_ config: Qwen2Configuration) {
         self.config = config
 
@@ -19,7 +24,7 @@ public class Qwen2Model: Module {
         )
 
         var layersList: [Qwen2TransformerBlock] = []
-        for _ in 0..<config.hiddenLayers {
+        for _ in 0 ..< config.hiddenLayers {
             layersList.append(Qwen2TransformerBlock(config))
         }
         self.layers = layersList
@@ -76,7 +81,9 @@ public class Qwen2Model: Module {
         }
     }
 
-    private func createAttentionMask(h: MLXArray, cache: KVCacheSimple?) -> MLXFast.ScaledDotProductAttentionMaskMode {
+    private func createAttentionMask(h: MLXArray, cache: KVCacheSimple?)
+        -> MLXFast.ScaledDotProductAttentionMaskMode
+    {
         let n = h.dim(1)
 
         if n == 1 {
@@ -89,21 +96,33 @@ public class Qwen2Model: Module {
             return .causal
         }
 
+        // Reuse cached mask if n and offset match
+        if n == cachedMaskN && offset == cachedMaskOffset, let mask = cachedMask {
+            return .array(mask)
+        }
+
         let mask = createCausalMask(n: n, offset: offset)
+        cachedMaskN = n
+        cachedMaskOffset = offset
+        cachedMask = mask
         return .array(mask)
     }
 
     private func createCausalMask(n: Int, offset: Int) -> MLXArray {
-        var rinds = MLXArray(Int32(0) ..< Int32(offset + n))
-        var linds = MLXArray(Int32(offset) ..< Int32(offset + n))
-        linds = linds[0..., .newAxis]
-        rinds = rinds[.newAxis]
-        let mask = linds .>= rinds
-        return mask
+        let rinds = MLXArray(Int32(0) ..< Int32(offset + n))[.newAxis]
+        let linds = MLXArray(Int32(offset) ..< Int32(offset + n))[0..., .newAxis]
+        return linds .>= rinds
     }
 
     public func newCache() -> [KVCacheSimple] {
-        (0..<config.hiddenLayers).map { _ in KVCacheSimple() }
+        (0 ..< config.hiddenLayers).map { _ in KVCacheSimple() }
+    }
+
+    /// Clears the cached attention mask. Call this when KV cache state changes externally.
+    public func clearMaskCache() {
+        cachedMaskN = 0
+        cachedMaskOffset = 0
+        cachedMask = nil
     }
 }
 

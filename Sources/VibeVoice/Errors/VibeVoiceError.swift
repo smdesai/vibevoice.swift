@@ -38,7 +38,8 @@ public enum VibeVoiceError: Error, LocalizedError {
         case .cacheError(let msg):
             return "Cache error: \(msg)"
         case .validationFailed(let name, let maxDiff, let tolerance):
-            return "Validation failed for '\(name)': max diff \(maxDiff) exceeds tolerance \(tolerance)"
+            return
+                "Validation failed for '\(name)': max diff \(maxDiff) exceeds tolerance \(tolerance)"
         case .invalidInput(let parameter, let reason):
             return "Invalid input for '\(parameter)': \(reason)"
         }

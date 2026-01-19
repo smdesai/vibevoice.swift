@@ -48,11 +48,16 @@ public struct AcousticTokenizerConfiguration: Codable, Sendable {
 
         self.channels = try container.decodeIfPresent(Int.self, forKey: .channels) ?? 1
         self.vaeDim = try container.decodeIfPresent(Int.self, forKey: .vaeDim) ?? 64
-        self.encoderNFilters = try container.decodeIfPresent(Int.self, forKey: .encoderNFilters) ?? 32
-        self.encoderRatios = try container.decodeIfPresent([Int].self, forKey: .encoderRatios) ?? [8, 5, 5, 4, 2, 2]
-        self.decoderNFilters = try container.decodeIfPresent(Int.self, forKey: .decoderNFilters) ?? 32
-        self.decoderRatios = try container.decodeIfPresent([Int].self, forKey: .decoderRatios) ?? [8, 5, 5, 4, 2, 2]
-        self.encoderDepths = try container.decodeIfPresent(String.self, forKey: .encoderDepths) ?? "3-3-3-3-3-3-8"
+        self.encoderNFilters =
+            try container.decodeIfPresent(Int.self, forKey: .encoderNFilters) ?? 32
+        self.encoderRatios =
+            try container.decodeIfPresent([Int].self, forKey: .encoderRatios) ?? [8, 5, 5, 4, 2, 2]
+        self.decoderNFilters =
+            try container.decodeIfPresent(Int.self, forKey: .decoderNFilters) ?? 32
+        self.decoderRatios =
+            try container.decodeIfPresent([Int].self, forKey: .decoderRatios) ?? [8, 5, 5, 4, 2, 2]
+        self.encoderDepths =
+            try container.decodeIfPresent(String.self, forKey: .encoderDepths) ?? "3-3-3-3-3-3-8"
         self.decoderDepths = try container.decodeIfPresent(String.self, forKey: .decoderDepths)
         self.causal = try container.decodeIfPresent(Bool.self, forKey: .causal) ?? true
         self.convBias = try container.decodeIfPresent(Bool.self, forKey: .convBias) ?? true
@@ -60,10 +65,14 @@ public struct AcousticTokenizerConfiguration: Codable, Sendable {
         self.padMode = try container.decodeIfPresent(String.self, forKey: .padMode) ?? "constant"
         self.layernorm = try container.decodeIfPresent(String.self, forKey: .layernorm) ?? "RMSNorm"
         self.layernormEps = try container.decodeIfPresent(Float.self, forKey: .layernormEps) ?? 1e-5
-        self.layernormElementwiseAffine = try container.decodeIfPresent(Bool.self, forKey: .layernormElementwiseAffine) ?? true
-        self.mixerLayer = try container.decodeIfPresent(String.self, forKey: .mixerLayer) ?? "depthwise_conv"
-        self.layerScaleInitValue = try container.decodeIfPresent(Float.self, forKey: .layerScaleInitValue) ?? 1e-6
-        self.disableLastNorm = try container.decodeIfPresent(Bool.self, forKey: .disableLastNorm) ?? true
+        self.layernormElementwiseAffine =
+            try container.decodeIfPresent(Bool.self, forKey: .layernormElementwiseAffine) ?? true
+        self.mixerLayer =
+            try container.decodeIfPresent(String.self, forKey: .mixerLayer) ?? "depthwise_conv"
+        self.layerScaleInitValue =
+            try container.decodeIfPresent(Float.self, forKey: .layerScaleInitValue) ?? 1e-6
+        self.disableLastNorm =
+            try container.decodeIfPresent(Bool.self, forKey: .disableLastNorm) ?? true
         self.fixStd = try container.decodeIfPresent(Float.self, forKey: .fixStd) ?? 0.5
     }
 

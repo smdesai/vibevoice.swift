@@ -24,7 +24,9 @@ public class TimestepEmbedder: Module {
         super.init()
     }
 
-    public static func timestepEmbedding(_ t: MLXArray, dim: Int, maxPeriod: Float = 10000, dtype: DType = .float32) -> MLXArray {
+    public static func timestepEmbedding(
+        _ t: MLXArray, dim: Int, maxPeriod: Float = 10000, dtype: DType = .float32
+    ) -> MLXArray {
         let half = dim / 2
 
         let logMaxPeriod = log(maxPeriod)

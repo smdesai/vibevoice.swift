@@ -28,10 +28,13 @@ public enum FinalSigmasType: String, Codable, Sendable {
     case sigma_min
 }
 
-public func betasForAlphaBar(numDiffusionTimesteps: Int, maxBeta: Float = 0.999, alphaTransformType: AlphaTransformType = .cosine) throws -> MLXArray {
+public func betasForAlphaBar(
+    numDiffusionTimesteps: Int, maxBeta: Float = 0.999,
+    alphaTransformType: AlphaTransformType = .cosine
+) throws -> MLXArray {
     var betas: [Float] = []
 
-    for i in 0..<numDiffusionTimesteps {
+    for i in 0 ..< numDiffusionTimesteps {
         let t1 = Float(i) / Float(numDiffusionTimesteps)
         let t2 = Float(i + 1) / Float(numDiffusionTimesteps)
 
@@ -110,9 +113,14 @@ public class DPMSolverMultistepScheduler {
 
         switch betaSchedule {
         case .cosine, .squaredcosCaptV2:
-            self.betas = try betasForAlphaBar(numDiffusionTimesteps: numTrainTimesteps, alphaTransformType: .cosine)
+            self.betas = try betasForAlphaBar(
+                numDiffusionTimesteps: numTrainTimesteps, alphaTransformType: .cosine)
         case .linear:
-            self.betas = MLXArray(stride(from: Float(0.0001), through: Float(0.02), by: Float(0.02 - 0.0001) / Float(numTrainTimesteps - 1)).map { $0 })
+            self.betas = MLXArray(
+                stride(
+                    from: Float(0.0001), through: Float(0.02),
+                    by: Float(0.02 - 0.0001) / Float(numTrainTimesteps - 1)
+                ).map { $0 })
         }
 
         self.alphas = 1.0 - betas
@@ -124,8 +132,13 @@ public class DPMSolverMultistepScheduler {
 
         self.modelOutputs = Array(repeating: nil, count: solverOrder)
 
+        // Reserve capacity to avoid reallocations during loop
+        precomputedAlphaT.reserveCapacity(numTrainTimesteps)
+        precomputedSigmaT.reserveCapacity(numTrainTimesteps)
+        precomputedLambda.reserveCapacity(numTrainTimesteps)
+
         let alphasCumprodArray = self.alphasCumprod.asArray(Float.self)
-        for i in 0..<numTrainTimesteps {
+        for i in 0 ..< numTrainTimesteps {
             let alpha = alphasCumprodArray[i]
             let sigma = sqrt((1 - alpha) / alpha)
             let alphaT = 1.0 / sqrt(sigma * sigma + 1.0)
@@ -141,25 +154,33 @@ public class DPMSolverMultistepScheduler {
         self.numInferenceSteps = numInferenceSteps
 
         var timestepValues: [Int] = []
-        for i in 0..<numInferenceSteps {
+        for i in 0 ..< numInferenceSteps {
             let t = Float(numTrainTimesteps - 1) * (1.0 - Float(i) / Float(numInferenceSteps))
             timestepValues.append(Int(t.rounded()))
         }
 
         self.timesteps = MLXArray(timestepValues.map { Int32($0) })
 
+        // Reserve capacity for inference arrays (+1 for final values)
+        let inferenceCapacity = numInferenceSteps + 1
         var inferSigmaValues: [Float] = []
         var inferAlphaTValues: [Float] = []
         var inferSigmaTValues: [Float] = []
         var inferLambdaValues: [Float] = []
+        inferSigmaValues.reserveCapacity(inferenceCapacity)
+        inferAlphaTValues.reserveCapacity(inferenceCapacity)
+        inferSigmaTValues.reserveCapacity(inferenceCapacity)
+        inferLambdaValues.reserveCapacity(inferenceCapacity)
 
         for t in timestepValues {
-            let sigma = sqrt((1 - precomputedAlphaT[t] * precomputedAlphaT[t]) / (precomputedAlphaT[t] * precomputedAlphaT[t]))
-            inferSigmaValues.append(sigma)
+            // Use precomputed values instead of recomputing
+            let alphaT = precomputedAlphaT[t]
+            let sigmaT = precomputedSigmaT[t]
+            let lambda = precomputedLambda[t]
+            let alphaTSquared = alphaT * alphaT
+            let sigma = sqrt((1 - alphaTSquared) / alphaTSquared)
 
-            let alphaT = 1.0 / sqrt(sigma * sigma + 1.0)
-            let sigmaT = sigma * alphaT
-            let lambda = log(alphaT) - log(sigmaT)
+            inferSigmaValues.append(sigma)
             inferAlphaTValues.append(alphaT)
             inferSigmaTValues.append(sigmaT)
             inferLambdaValues.append(lambda)
@@ -186,7 +207,9 @@ public class DPMSolverMultistepScheduler {
         return (alphaT, sigmaT)
     }
 
-    public func convertModelOutputGPU(modelOutput: MLXArray, sample: MLXArray, sigmaIdx: Int) throws -> MLXArray {
+    public func convertModelOutputGPU(modelOutput: MLXArray, sample: MLXArray, sigmaIdx: Int) throws
+        -> MLXArray
+    {
         let sigma = cachedInferenceSigmas[sigmaIdx]
         let (alphaT, sigmaT) = sigmaToAlphaSigmaT(sigma)
 
@@ -208,7 +231,8 @@ public class DPMSolverMultistepScheduler {
         sample: MLXArray,
         prevX0: MLXArray?
     ) throws -> (sample: MLXArray, x0Pred: MLXArray) {
-        let x0Pred = try convertModelOutputGPU(modelOutput: modelOutput, sample: sample, sigmaIdx: stepIdx)
+        let x0Pred = try convertModelOutputGPU(
+            modelOutput: modelOutput, sample: sample, sigmaIdx: stepIdx)
 
         let alphaTVal = cachedInferenceAlphaT[stepIdx + 1]
         let sigmaTConv = cachedInferenceSigmaT[stepIdx + 1]
@@ -218,8 +242,9 @@ public class DPMSolverMultistepScheduler {
         let lambdaS = cachedInferenceLambda[stepIdx]
         let h = lambdaT - lambdaS
 
-        let lowerOrderFinalFlag = (stepIdx == numInferenceSteps - 1) &&
-            ((lowerOrderFinal && numInferenceSteps < 15) || finalSigmasType == .zero)
+        let lowerOrderFinalFlag =
+            (stepIdx == numInferenceSteps - 1)
+            && ((lowerOrderFinal && numInferenceSteps < 15) || finalSigmasType == .zero)
 
         let useSecondOrder = !lowerOrderFinalFlag && prevX0 != nil && stepIdx > 0
 
@@ -236,8 +261,9 @@ public class DPMSolverMultistepScheduler {
 
             let sigmaRatio = sigmaTConv / sigmaSConv
             let expNegH = exp(-h)
-            prevSample = sigmaRatio * sample - alphaTVal * (expNegH - 1.0) * D0 -
-                   0.5 * alphaTVal * (expNegH - 1.0) * D1
+            prevSample =
+                sigmaRatio * sample - alphaTVal * (expNegH - 1.0) * D0 - 0.5 * alphaTVal
+                * (expNegH - 1.0) * D1
         } else {
             let sigmaRatio = sigmaTConv / sigmaSConv
             let expNegH = exp(-h)
@@ -270,8 +296,9 @@ public class DPMSolverMultistepScheduler {
         }
         modelOutputs[0] = x0Pred
 
-        let lowerOrderFinalFlag = (stepIndex == numInferenceSteps - 1) &&
-            ((lowerOrderFinal && numInferenceSteps < 15) || finalSigmasType == .zero)
+        let lowerOrderFinalFlag =
+            (stepIndex == numInferenceSteps - 1)
+            && ((lowerOrderFinal && numInferenceSteps < 15) || finalSigmasType == .zero)
 
         let order: Int
         if lowerOrderNums < 1 || lowerOrderFinalFlag {
@@ -350,8 +377,9 @@ public class DPMSolverMultistepScheduler {
 
         let sigmaRatio = sigmaTConv / sigmaS0Conv
         let expNegH = exp(-h)
-        let result = sigmaRatio * sample - alphaTVal * (expNegH - 1.0) * D0 -
-               0.5 * alphaTVal * (expNegH - 1.0) * D1
+        let result =
+            sigmaRatio * sample - alphaTVal * (expNegH - 1.0) * D0 - 0.5 * alphaTVal
+            * (expNegH - 1.0) * D1
         return result
     }
 
@@ -361,7 +389,9 @@ public class DPMSolverMultistepScheduler {
         stepIndex = 0
     }
 
-    public func addNoise(originalSamples: MLXArray, noise: MLXArray, timesteps: MLXArray) -> MLXArray {
+    public func addNoise(originalSamples: MLXArray, noise: MLXArray, timesteps: MLXArray)
+        -> MLXArray
+    {
         let alphaT = self.alphaT.take(timesteps, axis: 0)
         let sigmaT = self.sigmaT.take(timesteps, axis: 0)
 
