@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0308EF682F201162000C5487 /* GenerationStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0308EF672F201162000C5487 /* GenerationStats.swift */; };
+		0308EF6A2F201182000C5487 /* GenerationStatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0308EF692F201182000C5487 /* GenerationStatsView.swift */; };
 		8A0000010000000000000001 /* VibeVoiceAppApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A0000020000000000000001 /* VibeVoiceAppApp.swift */; };
 		8A0000010000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A0000020000000000000002 /* ContentView.swift */; };
 		8A0000010000000000000003 /* Voice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A0000020000000000000003 /* Voice.swift */; };
@@ -27,6 +29,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0308EF672F201162000C5487 /* GenerationStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationStats.swift; sourceTree = "<group>"; };
+		0308EF692F201182000C5487 /* GenerationStatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerationStatsView.swift; sourceTree = "<group>"; };
 		03CD2E6E2F1DC8B10063C80B /* VibeVoiceApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = VibeVoiceApp.entitlements; sourceTree = "<group>"; };
 		8A0000020000000000000001 /* VibeVoiceAppApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VibeVoiceAppApp.swift; sourceTree = "<group>"; };
 		8A0000020000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
@@ -85,6 +89,7 @@
 		8A0000060000000000000003 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				0308EF672F201162000C5487 /* GenerationStats.swift */,
 				8A0000020000000000000003 /* Voice.swift */,
 				8A0000020000000000000004 /* VoiceLanguage.swift */,
 			);
@@ -103,6 +108,7 @@
 		8A0000060000000000000005 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				0308EF692F201182000C5487 /* GenerationStatsView.swift */,
 				8A0000020000000000000010 /* MainTTSView.swift */,
 				8A0000020000000000000011 /* VoiceSelectorView.swift */,
 				8A0000020000000000000012 /* TextInputView.swift */,
@@ -217,6 +223,8 @@
 				8A0000010000000000000009 /* VoiceDownloadService.swift in Sources */,
 				8A0000010000000000000010 /* MainTTSView.swift in Sources */,
 				8A0000010000000000000011 /* VoiceSelectorView.swift in Sources */,
+				0308EF6A2F201182000C5487 /* GenerationStatsView.swift in Sources */,
+				0308EF682F201162000C5487 /* GenerationStats.swift in Sources */,
 				8A0000010000000000000012 /* TextInputView.swift in Sources */,
 				8A0000010000000000000013 /* PlaybackControlsView.swift in Sources */,
 				8A0000010000000000000014 /* ModelDownloadView.swift in Sources */,

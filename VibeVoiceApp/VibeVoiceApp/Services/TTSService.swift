@@ -139,7 +139,7 @@ actor TTSService {
     func generateAndPlay(
         text: String,
         onStart: @escaping () -> Void,
-        onComplete: @escaping () -> Void,
+        onComplete: @escaping (GenerationStats?) -> Void,
         onError: @escaping (Error) -> Void
     ) async throws {
         guard let inference = inference else {
@@ -162,18 +162,44 @@ actor TTSService {
         let player = try RealtimeAudioPlayer()
         audioPlayer = player
 
-        player.onPlaybackComplete = {
-            Task { @MainActor in
-                onComplete()
-            }
-        }
-
         let processedText = text.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
         let tokens = tokenizer.encode(text: processedText, addSpecialTokens: false)
         let tokenIds = MLXArray(tokens.map { Int32($0) }).reshaped([1, tokens.count])
 
         let streamer = AudioStreamer()
         streamer.delegate = player
+
+        // Timing tracking
+        let startTime = Date()
+        var firstChunkTime: Date?
+        var generationEndTime: Date?
+
+        streamer.onChunk = { _, index in
+            if index == 0 {
+                firstChunkTime = Date()
+            }
+        }
+
+        player.onPlaybackComplete = {
+            let stats: GenerationStats?
+            if let genEndTime = generationEndTime {
+                let audioDuration = streamer.duration
+                let generationTime = genEndTime.timeIntervalSince(startTime)
+                let timeToFirst = firstChunkTime?.timeIntervalSince(startTime) ?? 0
+
+                stats = GenerationStats(
+                    audioDuration: audioDuration,
+                    generationTime: generationTime,
+                    timeToFirstChunk: timeToFirst * 1000  // Convert to ms
+                )
+            } else {
+                stats = nil
+            }
+
+            Task { @MainActor in
+                onComplete(stats)
+            }
+        }
 
         try player.start()
         onStart()
@@ -183,6 +209,9 @@ actor TTSService {
             maxSpeechTokens: 500,
             audioStreamer: streamer
         )
+
+        // Mark when generation completes (before playback finishes)
+        generationEndTime = Date()
     }
 
     func stopPlayback() {

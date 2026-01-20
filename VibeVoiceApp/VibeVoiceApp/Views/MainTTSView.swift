@@ -25,6 +25,11 @@ struct MainTTSView: View {
                         onStop: viewModel.stop
                     )
 
+                    if let stats = viewModel.generationStats {
+                        GenerationStatsView(stats: stats)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+
                     if case .error(let message) = viewModel.state {
                         errorBanner(message: message)
                     }

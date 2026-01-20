@@ -42,6 +42,7 @@ class TTSViewModel: ObservableObject {
     }
     @Published var isGenerating: Bool = false
     @Published var waveformAmplitude: CGFloat = 0
+    @Published var generationStats: GenerationStats?
 
     let ttsService: TTSService
     @Published var voiceDownloadService = VoiceDownloadService.shared
@@ -92,6 +93,7 @@ class TTSViewModel: ObservableObject {
 
         state = .generating
         isGenerating = true
+        generationStats = nil
 
         Task {
             do {
@@ -103,10 +105,11 @@ class TTSViewModel: ObservableObject {
                             self?.startWaveformAnimation()
                         }
                     },
-                    onComplete: { [weak self] in
+                    onComplete: { [weak self] stats in
                         Task { @MainActor in
                             self?.state = .ready
                             self?.isGenerating = false
+                            self?.generationStats = stats
                             self?.stopWaveformAnimation()
                         }
                     },
